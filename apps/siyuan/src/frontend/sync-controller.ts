@@ -3,6 +3,11 @@ import type { SiyuanStillClient } from "./client.js";
 import { mergeKernelRecords, openSyncDatabase, replicateStill, SYNC_BATCH_SIZE, syncHash } from "./replication.js";
 import { authenticate, DEFAULT_SYNC_CONFIG, normalizeConfig, supabaseClient, supabaseTransport, type SyncConfig } from "./supabase.js";
 
+export interface SyncConfigStorage {
+  load(workspaceId: string): Promise<SyncConfig>;
+  save(config: SyncConfig): Promise<void>;
+}
+
 interface SyncState {
   config: SyncConfig;
   phase: "loading" | "disabled" | "connecting" | "ready" | "error";
@@ -26,7 +31,8 @@ export class StillSync {
   #dirty = false;
   #closed = false;
 
-  constructor(private readonly kernel: Pick<SiyuanStillClient, "syncRecords" | "applySyncRecords">) {
+  constructor(private readonly kernel: Pick<SiyuanStillClient, "syncRecords" | "applySyncRecords">,
+    private readonly configStorage: SyncConfigStorage) {
     window.addEventListener("storage", this.#onStorage);
     window.addEventListener("online", this.request);
   }
@@ -59,7 +65,7 @@ export class StillSync {
       this.#workspaceId = workspaceId;
       this.#storageKey = `still-sync-${workspaceId}`;
       this.#changes = db.records.$.subscribe(this.kernelChanged);
-      await this.#applyConfig(this.#readConfig());
+      await this.#applyConfig(await this.configStorage.load(workspaceId));
     })().catch(async (error: unknown) => {
       this.#changes?.unsubscribe();
       await this.#database?.close();
@@ -69,9 +75,12 @@ export class StillSync {
     });
   }
 
-  #readConfig(): SyncConfig {
-    const raw = localStorage.getItem(this.#storageKey);
-    return raw ? { ...DEFAULT_SYNC_CONFIG, ...JSON.parse(raw) as SyncConfig } : DEFAULT_SYNC_CONFIG;
+  async reloadConfig() {
+    await this.#load();
+    if (this.#closed) return;
+    const config = await this.configStorage.load(this.#workspaceId);
+    if (JSON.stringify(config) !== JSON.stringify(this.#state.config)) await this.#applyConfig(config);
+    this.request();
   }
 
   #applyConfig(config: SyncConfig): Promise<void> {
@@ -89,9 +98,7 @@ export class StillSync {
 
   readonly #onStorage = (event: StorageEvent) => {
     if (!this.#storageKey) return;
-    if (event.key === this.#storageKey) {
-      void Promise.resolve().then(() => this.#applyConfig(this.#readConfig())).then(this.request).catch((error: unknown) => this.#fail(error));
-    } else if (event.key === `${this.#storageKey}-request`) this.request();
+    if (event.key === `${this.#storageKey}-request`) this.request();
   };
 
   readonly kernelChanged = () => {
@@ -200,7 +207,7 @@ export class StillSync {
         }
       }
     }
-    localStorage.setItem(this.#storageKey, JSON.stringify(next));
+    await this.configStorage.save(next);
     await this.#applyConfig(next);
     this.request();
   }

@@ -43,11 +43,11 @@
 2. 在思源「续了么 → 设置 → Supabase 远程同步」填写项目 HTTPS URL、Publishable Key（或旧版 anon Key）、该账号的邮箱和密码。点「一键测试连接」，再开启远程同步并保存。其他设备使用同一个 Supabase Auth 账号。
 3. 同步在插件前端运行时自动推送订阅和续费决策的改动。默认每 60 秒拉取，也可点「立即同步」。启动插件、浏览器恢复联网或思源发出 `sync-end` 事件时也会拉取。离线改动会在重连后补传，同一记录以 `updatedAt` 的混合逻辑时钟版本判定胜负。删除通过 `deletedAt` 同步。
 
-首次加载会把旧的 `data/storage/petal/still/` 数据复制到 `conf/still/records-v1.json`。内核使用该文件提供后台提醒和日记；前端使用 RxDB/Dexie（IndexedDB）保存复制数据和同步检查点。原文件保留以便回退，升级后更新写入 `conf/still/`。关闭所有思源前端时，内核继续使用上次保存的数据，远程同步在前端重新打开后继续。
+首次加载会把旧的 `data/storage/petal/still/` 数据复制到 `conf/still/records-v1.json`。内核使用该文件提供后台提醒和日记；前端使用 RxDB/Dexie（IndexedDB）保存复制数据和同步检查点。订阅、续费决策、汇率缓存和投递记录继续写入该本机文件。普通设置和推送/日记配置会迁移到思源官方插件数据目录 `data/storage/petal/still/` 下的 `settings-v2.json`、`notifications-v2.json`，随思源同步；同步后的设置会被内核重新读取，无需重启。迁移前的完整文件另存为 `conf/still/before-settings-migration-v2.json`，旧的独立 JSON 文件也保留以便回退。关闭所有思源前端时，内核继续使用上次保存的数据，远程同步在前端重新打开后继续。
 
 ## 隐私
 
-远程同步默认关闭。启用后，仅订阅及续费决策发送到你配置的 Supabase 项目。外观、推送渠道、汇率缓存及提醒投递记录保存在本地。Supabase 按 Auth 用户隔离记录；插件在本机保存登录会话，密码只用于登录。汇率换算使用公开接口（open.er-api.com / Frankfurter），可以在设置中关闭。
+远程同步默认关闭。启用后，仅订阅及续费决策发送到你配置的 Supabase 项目。外观、提醒偏好、推送渠道及日记配置使用思源插件数据存储，随思源同步；其中可能包含推送渠道的凭据，请使用可信的思源同步空间。汇率缓存及提醒投递记录保存在本地。Supabase 连接参数（项目 URL、Publishable/anon Key、邮箱、账号标识和同步偏好）单独保存于 `supabase-connection-v1.json`，通过 `saveData/loadData` 随思源同步，并自动迁移旧的本机配置。Supabase 按 Auth 用户隔离记录；每台设备需要单独登录，登录会话只保存在该设备，密码只用于登录。汇率换算使用公开接口（open.er-api.com / Frankfurter），可以在设置中关闭。
 
 ## 开源
 

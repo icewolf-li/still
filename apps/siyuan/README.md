@@ -41,6 +41,14 @@ Still copies existing `data/storage/petal/still/` files into `conf/still/records
 
 ## Privacy
 
-Remote sync is off by default. When enabled, Still sends subscriptions and renewal decisions to the Supabase project you configure. Appearance, notification channels, cached rates, and reminder delivery records stay local. Supabase isolates records by Auth user. Still stores the session locally and uses the password for sign-in. Exchange-rate conversion uses open.er-api.com and Frankfurter and can be turned off in Settings.
+Remote sync is off by default. When enabled, Still sends subscriptions and renewal decisions to the Supabase project you configure. Appearance, reminder preferences, notification channels and journal settings follow SiYuan sync through official plugin data storage. Cached rates and reminder delivery records stay local. Supabase isolates records by Auth user. Still stores the session locally and uses the password for sign-in. Exchange-rate conversion uses open.er-api.com and Frankfurter and can be turned off in Settings.
 
 MIT · [github.com/suka233/still](https://github.com/suka233/still)
+
+### Configuration storage
+
+General preferences and notification/journal settings migrate to SiYuan's official plugin data directory (`data/storage/petal/still/settings-v2.json` and `notifications-v2.json`) and follow SiYuan sync. The kernel reads these files on demand, including while no frontend is open. Existing official settings take precedence over migration sources; a full pre-migration copy is kept at `conf/still/before-settings-migration-v2.json`.
+
+Supabase connection parameters are stored separately using `loadData/saveData` in `supabase-connection-v1.json`. Existing `still-sync-<workspaceId>` localStorage settings migrate automatically. Only the project URL, public key, email, user ID and sync preferences are persisted; each device signs in separately and retains its own Auth session. Passwords and session tokens are never included in the shared configuration. SiYuan data-change and sync-end events reload configuration. Notification channel credentials follow SiYuan sync, so use a trusted workspace.
+
+Subscriptions, renewal decisions, rates and delivery logs remain in the local kernel workspace file; subscriptions and decisions continue to use RxDB/Supabase replication.

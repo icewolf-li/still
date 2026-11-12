@@ -32,7 +32,8 @@ export function normalizeConfig(config: SyncConfig): SyncConfig {
   if (!Number.isInteger(config.intervalSeconds) || config.intervalSeconds < 15 || config.intervalSeconds > 3600) {
     throw new Error("Sync interval must be between 15 and 3600 seconds");
   }
-  return { ...config, url: url.origin, key, email };
+  return { enabled: config.enabled, url: url.origin, key, email, intervalSeconds: config.intervalSeconds,
+    ...(typeof config.userId === "string" ? { userId: config.userId } : {}) };
 }
 
 export function supabaseClient(config: SyncConfig, workspaceId?: string) {

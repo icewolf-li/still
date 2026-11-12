@@ -1,6 +1,6 @@
 // Minimal stand-in for SiYuan's `globalThis.siyuan` kernel API (see
 // siyuan/kernel/plugin/*.go), enough to drive kernel.js under goja-runner.
-var __mock = { storage: new Map(), records: new Map(), workspaceFile: null, mtimes: new Map(), rpc: new Map(), broadcasts: [], logs: [], watched: [], clock: 0 };
+var __mock = { storage: new Map(), records: new Map(), workspaceFile: null, backups: new Map(), mtimes: new Map(), rpc: new Map(), broadcasts: [], logs: [], watched: [], clock: 0 };
 
 (function () {
   function log(level) {
@@ -93,7 +93,7 @@ var __mock = { storage: new Map(), records: new Map(), workspaceFile: null, mtim
         }
         if (path === "/api/file/getFile") {
           var requested = JSON.parse(init.body).path;
-          var text = requested === "/conf/still/records-v1.json" ? __mock.workspaceFile
+          var text = __mock.backups.has(requested) ? __mock.backups.get(requested) : requested === "/conf/still/records-v1.json" ? __mock.workspaceFile
             : __mock.storage.get(requested.replace("/data/storage/petal/still/", ""));
           return text == null ? { ok: true, status: 202, json: async () => ({ code: 404 }) }
             : { ok: true, status: 200, text: async () => text };
@@ -106,9 +106,17 @@ var __mock = { storage: new Map(), records: new Map(), workspaceFile: null, mtim
         if (path === "/api/file/putFile") {
           var boundary = init.headers["Content-Type"].split("boundary=")[1];
           var parts = init.body.split("--" + boundary);
-          if (parts[1].indexOf("\r\n\r\n/conf/still/records-v1.json\r\n") < 0) throw new Error("unexpected workspace write");
-          __mock.workspaceFile = parts[2].split("\r\n\r\n")[1].trim();
-          __mock.records = new Map(Object.entries(JSON.parse(__mock.workspaceFile).files));
+          var target = parts[1].split("\r\n\r\n")[1].trim();
+          var content = parts[2].split("\r\n\r\n")[1].trim();
+          if (target.indexOf("/data/storage/petal/still/") === 0) {
+            __mock.storage.set(target.replace("/data/storage/petal/still/", ""), content);
+          } else if (target === "/conf/still/before-settings-migration-v2.json") {
+            __mock.backups.set(target, content);
+          } else {
+            if (target !== "/conf/still/records-v1.json") throw new Error("unexpected workspace write");
+            __mock.workspaceFile = content;
+            __mock.records = new Map(Object.entries(JSON.parse(content).files));
+          }
           return reply({ code: 0 });
         }
         if (path === "/api/notebook/lsNotebooks") {

@@ -71,6 +71,16 @@ make-kmind-tutorial-slice-lite pipeline against the dev kernel.
   RxDB/Dexie replica in the frontend. With Supabase enabled, the frontend
   replicates subscriptions and renewal decisions. Deletes are tombstones, and
   the `updatedAt` hybrid logical clock determines which record version wins.
+- **SiYuan settings** use the official `data/storage/petal/still/` directory:
+  `settings-v2.json` and `notifications-v2.json`. The kernel uses the file API
+  for the same storage as frontend `loadData/saveData`, preserving headless
+  reminders. Settings are read on demand, not cached in the records snapshot.
+  Migration prefers existing official settings and backs up the previous local
+  snapshot before removing its settings. Old individual files stay untouched.
+  Supabase connection parameters use a separate `supabase-connection-v1.json`
+  via frontend `loadData/saveData`, migrating the workspace's old localStorage
+  key only after a successful save. Passwords and Auth sessions stay device-local.
+  `onDataChanged` and `sync-end` refresh settings and reconfigure remote sync.
 - **Dates are civil dates** (`YYYY-MM-DD`), never instants. Month cycles are
   computed from the anchor (Jan 31 → Feb 28 → Mar 31). The kernel uses the
   host time zone; Docker deployments should set `TZ`.

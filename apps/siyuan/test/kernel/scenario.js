@@ -40,7 +40,7 @@
   check("empty snapshot", empty.subscriptions.length === 0 && empty.settings.notifyAt === "09:00", empty);
 
   var settings = await call("updateSettings", { notifyAt: "00:00" });
-  check("settings saved", settings.notifyAt === "00:00" && __mock.records.has("settings.json"));
+  check("settings saved", settings.notifyAt === "00:00" && __mock.storage.has("settings-v2.json") && !__mock.records.has("settings.json"));
 
   var input = {
     name: "Netflix",

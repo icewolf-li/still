@@ -47,6 +47,7 @@ export function SyncSettings({ sync }: { sync: StillSync }) {
         <CardTitle className="still:font-display">{t("Supabase 远程同步", "Supabase sync")}</CardTitle>
         <CardDescription>{t("在使用同一个 Supabase Auth 账号的设备间同步订阅和续费决策。", "Sync subscriptions and renewal decisions between devices using the same Supabase Auth account.")}</CardDescription>
       </CardHeader>
+      <p className="still:text-sm still:text-muted-foreground">{t("项目 URL、公开 Key、账号和同步偏好随思源同步；每台设备需要单独登录，密码和登录会话不会同步。", "Project URL, public key, account and sync preferences follow SiYuan sync. Sign in on each device; passwords and sessions stay local.")}</p>
       <fieldset disabled={busy || state.phase === "loading"} className="still:grid still:min-w-0 still:gap-3">
         <div className="still:flex still:items-center still:justify-between still:gap-3">
           <Label htmlFor={`${id}-enabled`}>{t("启用远程同步", "Enable remote sync")}</Label>

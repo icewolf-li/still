@@ -21,6 +21,7 @@ import { Dialog, Plugin, confirm, getFrontend, openTab, platformUtils, type Prot
 import pluginJson from "../../plugin.json" with { type: "json" };
 import { RPC, type RemindersDueParams } from "../shared/rpc.js";
 import { createRpcClient, type SiyuanStillClient } from "./client.js";
+import { pluginSyncConfig } from "./config-storage.js";
 import { ICONS } from "./icons.js";
 import { SyncSettings } from "./SyncSettings.js";
 import { StillSync } from "./sync-controller.js";
@@ -65,7 +66,7 @@ export default class StillPlugin extends Plugin {
     this.#isMobile = getFrontend() === "mobile" || getFrontend() === "browser-mobile";
 
     this.#client = createRpcClient(this.kernel.rpc);
-    this.#remoteSync = new StillSync(this.#client);
+    this.#remoteSync = new StillSync(this.#client, pluginSyncConfig(this, localStorage));
     this.#store = createStillStore(this.#client);
     this.#store.setState({ hostDark: isSiyuanDark() });
     this.#scopes = new ScopeRegistry(this.#store);
@@ -140,7 +141,7 @@ export default class StillPlugin extends Plugin {
     this.kernel.rpc.bind(RPC.notifyChanged, this.#onChanged);
     this.kernel.rpc.bind(RPC.notifyRemindersDue, this.#onRemindersDue);
     this.eventBus.on("kernel-plugin-state-change", this.#onKernelState);
-    this.eventBus.on("sync-end", this.#remoteSync.request);
+    this.eventBus.on("sync-end", this.#onSyncEnd);
     // Catch up after the window was hidden (laptop sleep, another app in front).
     document.addEventListener("visibilitychange", this.#onVisible);
     window.addEventListener("focus", this.#onVisible);
@@ -151,12 +152,21 @@ export default class StillPlugin extends Plugin {
     await this.#sync();
   }
 
+  override async onDataChanged() {
+    if (!this.#store) return;
+    await Promise.all([this.#remoteSync.reloadConfig(), this.#store.getState().refresh()]);
+  }
+
+  readonly #onSyncEnd = () => {
+    void this.onDataChanged().catch((error: unknown) => console.warn("[still] configuration reload failed", error));
+  };
+
   override onunload() {
     if (!this.#store) return;
     this.kernel.rpc.unbind(RPC.notifyChanged, this.#onChanged);
     this.kernel.rpc.unbind(RPC.notifyRemindersDue, this.#onRemindersDue);
     this.eventBus.off("kernel-plugin-state-change", this.#onKernelState);
-    this.eventBus.off("sync-end", this.#remoteSync.request);
+    this.eventBus.off("sync-end", this.#onSyncEnd);
     void this.#remoteSync.close().catch((error: unknown) => console.warn("[still] sync shutdown failed", error));
     document.removeEventListener("visibilitychange", this.#onVisible);
     window.removeEventListener("focus", this.#onVisible);

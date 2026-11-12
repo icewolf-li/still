@@ -9,7 +9,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --watch",
-    "test": "node scripts/test-kernel.mjs && node --test test/sync/sync.test.mjs",
+    "test": "node scripts/test-kernel.mjs && node --test test/sync/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.kernel.json",
     "serve": "node scripts/serve.mjs"
   },

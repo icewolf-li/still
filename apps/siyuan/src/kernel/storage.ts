@@ -1,6 +1,11 @@
 import { PATHS, randomUuid, type FileStore } from "@still/core";
 
 const LOCAL_PATH = "/conf/still/records-v1.json";
+const CONFIG_FILES: Record<string, string> = {
+  [PATHS.settings]: "settings-v2.json",
+  [PATHS.notifications]: "notifications-v2.json",
+};
+
 const LEGACY_PATH = "/data/storage/petal/still";
 
 interface WorkspaceData {
@@ -25,14 +30,13 @@ async function listFiles(path: string): Promise<string[]> {
   return result.data.filter((entry) => !entry.isDir && /^[\w.-]+\.json$/.test(entry.name)).map((entry) => entry.name);
 }
 
-async function saveWorkspace(data: WorkspaceData): Promise<void> {
+async function writeFile(path: string, json: string): Promise<void> {
   // This API takes multipart. The kernel SDK supports string bodies on all of Still's platforms.
-  const json = JSON.stringify(data);
   let boundary: string;
   do boundary = `Still${randomUuid().replace(/-/g, "")}`;
   while (json.includes(boundary));
   const body = [
-    `--${boundary}`, 'Content-Disposition: form-data; name="path"', "", LOCAL_PATH,
+    `--${boundary}`, 'Content-Disposition: form-data; name="path"', "", path,
     `--${boundary}`, 'Content-Disposition: form-data; name="file"; filename="records-v1.json"',
     "Content-Type: application/json", "", json, `--${boundary}--`, "",
   ].join("\r\n");
@@ -40,6 +44,10 @@ async function saveWorkspace(data: WorkspaceData): Promise<void> {
     method: "POST", headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` }, body,
   });
   if (!response.ok || (await response.json()).code !== 0) throw new Error("Still could not save its local workspace data");
+}
+
+async function saveWorkspace(data: WorkspaceData): Promise<void> {
+  await writeFile(LOCAL_PATH, JSON.stringify(data));
 }
 
 /** Keeps the kernel usable without a frontend, including after a restart. */
@@ -66,12 +74,32 @@ export async function openWorkspace(): Promise<{ id: string; files: FileStore }>
     }
   }
 
+  // New names distinguish current settings from the pre-RxDB rollback files.
+  // Never overwrite an official setting that has already arrived via SiYuan sync.
+  for (const [path, name] of Object.entries(CONFIG_FILES)) {
+    const target = `${LEGACY_PATH}/${name}`;
+    if (await readFile(target) === null && data.files[path] !== undefined) {
+      await writeFile(target, data.files[path]!);
+    }
+  }
+  // Remove migrated settings from the active local snapshot only after all writes succeed.
+  if (Object.keys(CONFIG_FILES).some((path) => Object.hasOwn(data.files, path))) {
+    const backupPath = "/conf/still/before-settings-migration-v2.json";
+    if (await readFile(backupPath) === null) await writeFile(backupPath, JSON.stringify(data));
+    const next = { ...data, files: { ...data.files } };
+    for (const path of Object.keys(CONFIG_FILES)) delete next.files[path];
+    await saveWorkspace(next);
+    data = next;
+  }
+
   let pending = Promise.resolve();
   const files: FileStore = {
     async read(path) {
+      if (CONFIG_FILES[path]) return readFile(`${LEGACY_PATH}/${CONFIG_FILES[path]}`);
       return Object.hasOwn(data.files, path) ? data.files[path]! : null;
     },
     write(path, content) {
+      if (CONFIG_FILES[path]) return writeFile(`${LEGACY_PATH}/${CONFIG_FILES[path]}`, content);
       const write = pending.then(async () => {
         const next = { ...data, files: { ...data.files, [path]: content } };
         await saveWorkspace(next);
