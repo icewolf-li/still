@@ -17,7 +17,7 @@ import { ThemePicker } from "./ThemePicker.js";
 const REMIND_OPTIONS = [0, 1, 2, 3, 5, 7, 14, 30];
 
 /** All settings, saved as you change them. */
-export function SettingsView() {
+export function SettingsView({ extra }: { extra?: ReactNode } = {}) {
   const { t } = useI18n();
   const settings = useStill((s) => s.settings);
   const save = useStill((s) => s.saveSettings);
@@ -70,6 +70,7 @@ export function SettingsView() {
         <DataActions />
       </Section>
 
+      {extra}
       <About />
     </div>
   );

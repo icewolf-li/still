@@ -1,40 +1,17 @@
 /**
  * Still kernel plugin. Runs inside SiYuan's Go kernel (goja), independently of
  * any open window. The service itself is `@still/engine`; this file adapts it
- * to SiYuan: storage, forward-proxy HTTP, daily notes, change detection and
+ * to SiYuan: workspace storage, forward-proxy HTTP, daily notes and
  * JSON-RPC (see `../shared/rpc.ts`) with `changed` / `reminders-due` pushes.
  */
-import { NotFoundError, PATHS, ValidationError, type FileStore } from "@still/core";
+import { NotFoundError, ValidationError, type FileStore, type Decision, type Subscription } from "@still/core";
 import { StillEngine, type DeviceInfo, type EngineHost } from "@still/engine";
 import { RPC, type RpcErrorData } from "../shared/rpc.js";
 import { registerAgentCapability } from "./agent.js";
 import { httpRequest } from "./http.js";
 import { journal, listNotebooks, translator } from "./notify.js";
-
-/** How often storage is checked for changes made elsewhere (sync, other devices). */
-const POLL_MS = 15_000;
-/** Directories watched for changes, relative to the plugin's storage dir. */
-const WATCHED = [".", PATHS.subscriptionsDir, PATHS.decisionsDir, PATHS.deliveredDir];
-
-const files: FileStore = {
-  async read(path) {
-    try {
-      return await (await siyuan.storage.get(path)).text();
-    } catch {
-      return null; // `get` rejects for missing files
-    }
-  },
-  async write(path, content) {
-    await siyuan.storage.put(path, content);
-  },
-  async list(dir) {
-    try {
-      return (await siyuan.storage.list(dir)).filter((e) => !e.isDir).map((e) => e.name);
-    } catch {
-      return [];
-    }
-  },
-};
+import { openWorkspace } from "./storage.js";
+import { decisionRecord, parseSyncRecord, subscriptionRecord } from "../shared/sync.js";
 
 /** This device as SiYuan knows it; the ID is reduced to the characters HLC node IDs allow. */
 async function readConf(): Promise<{ device: DeviceInfo; lang: string }> {
@@ -64,54 +41,8 @@ function toRpcError(e: unknown): Error {
 }
 
 let engine: StillEngine;
-const timers: unknown[] = [];
-/** Last seen shape of the storage directories, to notice edits made elsewhere. */
-let fingerprint = "";
-const unwatched = new Set(WATCHED);
 
-async function readFingerprint(): Promise<string> {
-  const parts: string[] = [];
-  for (const dir of WATCHED) {
-    try {
-      for (const e of await siyuan.storage.list(dir)) if (!e.isDir) parts.push(`${dir}/${e.name}@${e.updated}`);
-    } catch {
-      // directory not created yet
-    }
-  }
-  return parts.sort().join("|");
-}
-
-/** Tells the engine if storage differs from the last known state. */
-async function detectExternalChange() {
-  const next = await readFingerprint();
-  if (next === fingerprint) return;
-  fingerprint = next;
-  await engine.externalChange();
-}
-
-/** Watches storage directories where the platform supports it (not on mobile). */
-async function watchStorage() {
-  for (const dir of [...unwatched]) {
-    try {
-      await siyuan.storage.watcher.add(dir);
-      unwatched.delete(dir);
-    } catch {
-      // Missing directory or unsupported platform; polling covers it.
-    }
-  }
-}
-
-let fsDebounce: unknown = null;
-function onKernelEvent(event: { type: string }) {
-  if (event.type !== "fs-notify") return;
-  if (fsDebounce) clearTimeout(fsDebounce);
-  fsDebounce = setTimeout(() => {
-    fsDebounce = null;
-    void detectExternalChange();
-  }, 400);
-}
-
-function createHost(device: DeviceInfo, lang: string): EngineHost {
+function createHost(device: DeviceInfo, lang: string, files: FileStore): EngineHost {
   return {
     files,
     device,
@@ -130,19 +61,33 @@ function createHost(device: DeviceInfo, lang: string): EngineHost {
       return () => clearInterval(handle);
     },
     journal,
-    async afterWrite() {
-      // Our own writes may have just created a directory worth watching.
-      if (unwatched.size) await watchStorage();
-      fingerprint = await readFingerprint();
-    },
   };
 }
 
 type Handler = (...args: any[]) => Promise<unknown> | unknown;
 
-function handlers(e: StillEngine): Record<string, Handler> {
+function handlers(e: StillEngine, workspaceId: string): Record<string, Handler> {
   return {
     [RPC.snapshot]: () => e.snapshot(),
+    [RPC.syncRecords]: async () => {
+      const [subscriptions, decisions] = await Promise.all([
+        e.repo.listSubscriptions({ includeDeleted: true }),
+        e.repo.listDecisions({ includeDeleted: true }),
+      ]);
+      return { workspaceId, records: [...subscriptions.map(subscriptionRecord), ...decisions.map(decisionRecord)] };
+    },
+    [RPC.applySyncRecords]: async (raw: unknown) => {
+      if (!Array.isArray(raw) || raw.length > 100) throw new ValidationError(["Invalid Still sync batch"]);
+      const subscriptions: Subscription[] = [];
+      const decisions: Decision[] = [];
+      for (const entry of raw) {
+        const record = parseSyncRecord(entry);
+        if (!record) throw new ValidationError(["Invalid Still sync record"]);
+        if (record.id.startsWith("subscription:")) subscriptions.push(record.payload as Subscription);
+        else decisions.push(record.payload as Decision);
+      }
+      return e.mergeRecords(subscriptions, decisions);
+    },
     [RPC.createSubscription]: (input: unknown, options?: { settle?: boolean }) => e.createSubscription(input, options),
     [RPC.updateSubscription]: (id: string, input: unknown) => e.updateSubscription(id, input),
     [RPC.deleteSubscription]: (id: string) => e.deleteSubscription(id),
@@ -164,8 +109,9 @@ function handlers(e: StillEngine): Record<string, Handler> {
 
 siyuan.plugin.lifecycle.onload = async () => {
   const { device, lang } = await readConf();
-  engine = new StillEngine(createHost(device, lang));
-  for (const [name, handler] of Object.entries(handlers(engine))) {
+  const { id, files } = await openWorkspace();
+  engine = new StillEngine(createHost(device, lang, files));
+  for (const [name, handler] of Object.entries(handlers(engine, id))) {
     await siyuan.rpc.bind(name, async (...args: unknown[]) => {
       try {
         return await handler(...args);
@@ -174,27 +120,8 @@ siyuan.plugin.lifecycle.onload = async () => {
       }
     });
   }
-  siyuan.event.handler = onKernelEvent;
   await registerAgentCapability(() => engine.repo);
 };
 
-siyuan.plugin.lifecycle.onrunning = () => {
-  // Fire-and-forget: hooks must not block the kernel's startup sequence.
-  void (async () => {
-    fingerprint = await readFingerprint();
-    await watchStorage();
-    engine.start();
-  })();
-  timers.push(
-    setInterval(() => {
-      void watchStorage();
-      void detectExternalChange();
-    }, POLL_MS),
-  );
-};
-
-siyuan.plugin.lifecycle.onunload = () => {
-  engine?.stop();
-  for (const t of timers.splice(0)) clearInterval(t);
-  siyuan.event.handler = null;
-};
+siyuan.plugin.lifecycle.onrunning = () => engine.start();
+siyuan.plugin.lifecycle.onunload = () => engine?.stop();

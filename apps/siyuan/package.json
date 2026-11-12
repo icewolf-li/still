@@ -9,24 +9,29 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --watch",
-    "test": "node scripts/test-kernel.mjs",
+    "test": "node scripts/test-kernel.mjs && node --test test/sync/sync.test.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.kernel.json",
     "serve": "node scripts/serve.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "2.4.0",
     "@still/core": "workspace:*",
     "@still/engine": "workspace:*",
     "@still/ui": "workspace:*",
+    "@supabase/supabase-js": "2.119.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "rxdb": "17.6.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.1",
     "esbuild": "^0.28.2",
+    "fake-indexeddb": "6.2.8",
     "fflate": "^0.8.3",
     "siyuan": "^1.2.9",
     "tailwindcss": "^4.3.3",

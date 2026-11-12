@@ -6,6 +6,8 @@ export type { Snapshot } from "@still/core";
 export const RPC = {
   // frontend → kernel calls
   snapshot: "snapshot",
+  syncRecords: "syncRecords",
+  applySyncRecords: "applySyncRecords",
   createSubscription: "createSubscription",
   updateSubscription: "updateSubscription",
   deleteSubscription: "deleteSubscription",

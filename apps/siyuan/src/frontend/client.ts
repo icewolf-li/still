@@ -3,7 +3,11 @@ import type { StillClient } from "@still/ui";
 import type { IKernelPluginRpc } from "siyuan";
 import { RPC } from "../shared/rpc.js";
 
+import type { SyncRecord, WorkspaceRecords } from "../shared/sync.js";
+
 export interface SiyuanStillClient extends StillClient {
+  syncRecords(): Promise<WorkspaceRecords>;
+  applySyncRecords(records: SyncRecord[]): Promise<unknown>;
   pendingReminders(): Promise<DueReminder[]>;
   /** Returns the keys this window won; see the kernel's `claimReminders`. */
   claimReminders(keys: string[]): Promise<string[]>;
@@ -38,6 +42,8 @@ export function createRpcClient(rpc: IKernelPluginRpc): SiyuanStillClient {
 
   return {
     snapshot: () => call(RPC.snapshot),
+    syncRecords: () => call(RPC.syncRecords),
+    applySyncRecords: (records) => call(RPC.applySyncRecords, records),
     createSubscription: (input) => call(RPC.createSubscription, input),
     updateSubscription: (id, input) => call(RPC.updateSubscription, id, input),
     deleteSubscription: async (id) => {

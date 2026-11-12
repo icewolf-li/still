@@ -18,7 +18,7 @@ Still keeps track of your subscriptions and free trials, inside the notes app yo
 - **90+ services** with brand icons; multi-currency totals combined with exchange rates.
 - **Eight themes** — five receipt styles (Thermal, Boutique, Ticket, Riso, Swiss) plus Calm, Wallet and Timeline — each in light and dark, following your app.
 - **Lives in your notes** — daily-note entries for charges and cancellations, and a live overview table in any note.
-- **Your data stays yours** — plain JSON files in your vault or workspace, synced however you sync it; JSON export and import, and the same format in both apps.
+- **Your data stays yours** — local storage in your vault or workspace, with portable JSON import and export in both apps. SiYuan also supports optional Supabase sync.
 
 ## Obsidian
 
@@ -46,7 +46,7 @@ Install from **Bazaar → Plugins**, search for "Still" or "续了么". Requires
 
 ## Privacy
 
-Apart from push channels you configure, Still only calls public exchange-rate APIs (open.er-api.com / Frankfurter; turn conversion off in Settings to stop). Your subscription data is never uploaded.
+Still uses the push channels you configure and public exchange-rate APIs (open.er-api.com and Frankfurter) when currency conversion is enabled. SiYuan sends subscriptions and renewal decisions to your Supabase project only when you enable remote sync.
 
 ## License
 

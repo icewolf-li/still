@@ -1,6 +1,6 @@
 import type { Subscription } from "@still/core";
 import { CalendarDaysIcon, ChartPieIcon, ListIcon, PlusIcon, Settings2Icon } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "../../components/ui/button.js";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs.js";
 import { useI18n, useStill } from "../../context.js";
@@ -16,7 +16,7 @@ import { SubscriptionList } from "./SubscriptionList.js";
 export type ManagerTab = "list" | "calendar" | "insights" | "settings";
 
 /** Full-page view: totals, every subscription, calendar, insights and settings. */
-export function ManagerView({ initialTab = "list" }: { initialTab?: ManagerTab }) {
+export function ManagerView({ initialTab = "list", settingsExtra }: { initialTab?: ManagerTab; settingsExtra?: ReactNode }) {
   const { t } = useI18n();
   const status = useStill((s) => s.status);
   const [tab, setTab] = useState<ManagerTab>(initialTab);
@@ -60,7 +60,7 @@ export function ManagerView({ initialTab = "list" }: { initialTab?: ManagerTab }
               <TabsContent value="list"><SubscriptionList onEdit={openEditor} /></TabsContent>
               <TabsContent value="calendar"><CalendarView onEdit={openEditor} /></TabsContent>
               <TabsContent value="insights"><InsightsView onEdit={openEditor} /></TabsContent>
-              <TabsContent value="settings"><SettingsView /></TabsContent>
+              <TabsContent value="settings"><SettingsView extra={settingsExtra} /></TabsContent>
             </Tabs>
           </>
         )}

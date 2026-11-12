@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4
+
+### SiYuan
+
+- Add optional bidirectional Supabase sync for subscriptions and renewal decisions. Enable it in Still's settings after testing the connection.
+- Keep subscriptions available offline with RxDB and resume sync when connectivity returns. Still also pulls after SiYuan finishes a sync.
+- Migrate existing records to workspace-local storage. The kernel continues to schedule reminders and write daily notes when no frontend is open.
+
 ## 0.1.3
 
 Obsidian: passes the community directory's automated review.
