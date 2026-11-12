@@ -29,16 +29,18 @@
   }
 
   var life = siyuan.plugin.lifecycle;
+  await siyuan.storage.put("delivered/legacy.json", '{"schemaVersion":1,"keys":{}}');
   await life.onload();
   await life.onrunning();
 
-  check("binds all RPC methods", __mock.rpc.size === 17, Array.from(__mock.rpc.keys()));
+  check("binds all RPC methods", __mock.rpc.size === 19, Array.from(__mock.rpc.keys()));
 
+  check("copies legacy data into the local workspace file", __mock.records.has("delivered/legacy.json") && __mock.storage.has("delivered/legacy.json"));
   var empty = await call("snapshot");
   check("empty snapshot", empty.subscriptions.length === 0 && empty.settings.notifyAt === "09:00", empty);
 
   var settings = await call("updateSettings", { notifyAt: "00:00" });
-  check("settings saved", settings.notifyAt === "00:00" && __mock.storage.has("settings.json"));
+  check("settings saved", settings.notifyAt === "00:00" && __mock.records.has("settings.json"));
 
   var input = {
     name: "Netflix",
@@ -50,7 +52,7 @@
   __mock.broadcasts.length = 0;
   var created = await call("createSubscription", input);
   check("create returns record", typeof created.id === "string" && created.name === "Netflix", created);
-  check("one file per subscription", __mock.storage.has("subscriptions/" + created.id + ".json"));
+  check("one file per subscription", __mock.records.has("subscriptions/" + created.id + ".json"));
   check("broadcasts changed", __mock.broadcasts.some((b) => b.method === "changed"));
   check("hlc uses device id", /-8d2fABC123device$/.test(created.updatedAt), created.updatedAt);
 
@@ -66,14 +68,14 @@
 
   var trialSub = await call("createSubscription", Object.assign({}, input, { name: "Trial", anchorDate: localDate(1), trialEndsOn: localDate(1) }));
   var afterTrial = await call("snapshot");
-  var trialDelivered = JSON.parse(__mock.storage.get("delivered/8d2fABC123device.json")).keys;
+  var trialDelivered = JSON.parse(__mock.records.get("delivered/8d2fABC123device.json")).keys;
   check("new trial isn't auto-kept but won't pop up", !afterTrial.decisions.some((d) => d.subscriptionId === trialSub.id) && trialDelivered[trialSub.id + ":" + localDate(1) + ":t1"], afterTrial.decisions);
   await call("deleteSubscription", trialSub.id);
 
   var key = pending[0].key;
   var results = await Promise.all([call("claimReminders", [key]), call("claimReminders", [key])]);
   check("exactly one window wins the claim", results[0].length + results[1].length === 1, results);
-  check("delivery recorded per device", __mock.storage.has("delivered/8d2fABC123device.json"));
+  check("delivery recorded per device", __mock.records.has("delivered/8d2fABC123device.json"));
   check("claimed reminder no longer pending", (await call("pendingReminders")).length === 0);
 
   var error = null;
@@ -87,7 +89,7 @@
   // --- decisions ---
   var charge = pending[0].chargeDate;
   var snoozed = await call("decide", created.id, charge, "snooze", localDate(1));
-  check("snooze recorded", snoozed.decision.choice === "snooze" && __mock.storage.has("decisions/" + created.id + "_" + charge + ".json"), snoozed);
+  check("snooze recorded", snoozed.decision.choice === "snooze" && __mock.records.has("decisions/" + created.id + "_" + charge + ".json"), snoozed);
   check("snapshot carries decisions", (await call("snapshot")).decisions.length === 1);
 
   var cancelled = await call("decide", created.id, charge, "cancel");
@@ -106,18 +108,18 @@
   }
   check("invalid choice rejected", bad !== null && bad.indexOf("choice must be") >= 0, bad);
 
-  // --- changes made outside the kernel (sync, another device) ---
-  check("watches existing storage dirs", __mock.watched.indexOf("subscriptions") >= 0, __mock.watched);
+  // --- changes from RxDB go through the kernel, independently of old JSON ---
+  var mirror = await call("syncRecords");
+  var localRecord = mirror.records.find((r) => r.payload.id === created.id);
+  check("sync reads live records and decision tombstones", localRecord.payload.name === "Netflix" && mirror.records.some((r) => r.id.indexOf("decision:") === 0 && r.payload.deletedAt), mirror);
+  var foreign = Object.assign({}, localRecord.payload, { name: "Edited on phone", updatedAt: localRecord.version.replace(/-[^-]+$/, "-zzz") });
+  await siyuan.storage.put("subscriptions/" + created.id + ".json", JSON.stringify(Object.assign({}, foreign, { name: "From old SiYuan sync" })));
+  check("old SiYuan files cannot replace local records", (await call("snapshot")).subscriptions[0].name === "Netflix");
   __mock.broadcasts.length = 0;
-  siyuan.event.handler({ id: "x", type: "fs-notify", detail: {} });
-  await sleep(600);
-  check("no broadcast when nothing changed", !__mock.broadcasts.some((b) => b.method === "changed"), __mock.broadcasts);
-  var foreign = JSON.parse(__mock.storage.get("subscriptions/" + created.id + ".json"));
-  foreign.name = "Edited on phone";
-  await siyuan.storage.put("subscriptions/" + created.id + ".json", JSON.stringify(foreign));
-  siyuan.event.handler({ id: "y", type: "fs-notify", detail: {} });
-  await sleep(600);
-  check("external edit broadcasts changed", __mock.broadcasts.some((b) => b.method === "changed" && b.params.source === "storage"), __mock.broadcasts);
+  await call("applySyncRecords", [{ id: localRecord.id, version: foreign.updatedAt, payload: foreign }]);
+  check("remote record updates the kernel and broadcasts", (await call("snapshot")).subscriptions[0].name === "Edited on phone" && __mock.broadcasts.some((b) => b.method === "changed"));
+  var stale = await call("applySyncRecords", [localRecord]);
+  check("stale remote updates do not overwrite newer kernel data", stale.skipped === 1 && (await call("snapshot")).subscriptions[0].name === "Edited on phone");
 
   // --- exchange rates through the forward proxy ---
   var rates = await call("refreshRates");
@@ -169,7 +171,7 @@
   await sleep(300);
   var pushyPushes = () => __mock.proxied.filter((p) => p.url === "https://ntfy.sh" && p.payload.title.indexOf("Pushy") >= 0);
   check("due reminder pushed even though a window already showed it", pushyPushes().length === 1, __mock.proxied);
-  check("push recorded in delivery log", JSON.parse(__mock.storage.get("delivered/8d2fABC123device.json")).keys["push|" + reminderSub.id + ":" + localDate(1) + ":t1"]);
+  check("push recorded in delivery log", JSON.parse(__mock.records.get("delivered/8d2fABC123device.json")).keys["push|" + reminderSub.id + ":" + localDate(1) + ":t1"]);
   await call("updateSettings", { notifyAt: "00:00" }); // triggers another tick
   await sleep(300);
   check("no duplicate push on later ticks", pushyPushes().length === 1, __mock.proxied);
@@ -211,7 +213,7 @@
 
   await call("deleteSubscription", created.id);
   var after = await call("snapshot");
-  var tomb = JSON.parse(__mock.storage.get("subscriptions/" + created.id + ".json"));
+  var tomb = JSON.parse(__mock.records.get("subscriptions/" + created.id + ".json"));
   check("delete leaves a tombstone", after.subscriptions.length === 0 && !!tomb.deletedAt, tomb);
 
   var notFound = null;
@@ -222,6 +224,10 @@
   }
   check("deleting twice reports not-found", notFound !== null && notFound.indexOf("not-found") >= 0, notFound);
 
+  await life.onunload();
+  await life.onload();
+  var reopened = await call("syncRecords");
+  check("restart preserves workspace ID and tombstones", reopened.workspaceId === mirror.workspaceId && reopened.records.some((r) => r.id === localRecord.id && r.payload.deletedAt));
   await life.onunload();
   check("no warnings or errors logged", __mock.logs.filter((l) => l[0] === "warn" || l[0] === "error").length === 0, __mock.logs);
 

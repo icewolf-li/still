@@ -67,10 +67,10 @@ make-kmind-tutorial-slice-lite pipeline against the dev kernel.
 - **The kernel plugin is the single writer.** The frontend calls it over
   JSON-RPC (`apps/siyuan/src/shared/rpc.ts`); it broadcasts `changed` and
   `reminders-due`. Reminders are computed even when no window is open.
-- **One file per subscription** under `data/storage/petal/still/subscriptions/`,
-  so SiYuan's file-level sync behaves like per-record last-writer-wins.
-  Deletes are tombstones. `updatedAt` is a hybrid logical clock string, ready
-  for a sync server.
+- **SiYuan sync** uses a kernel copy in `conf/still/records-v1.json` and an
+  RxDB/Dexie replica in the frontend. With Supabase enabled, the frontend
+  replicates subscriptions and renewal decisions. Deletes are tombstones, and
+  the `updatedAt` hybrid logical clock determines which record version wins.
 - **Dates are civil dates** (`YYYY-MM-DD`), never instants. Month cycles are
   computed from the anchor (Jan 31 → Feb 28 → Mar 31). The kernel uses the
   host time zone; Docker deployments should set `TZ`.
@@ -80,15 +80,27 @@ make-kmind-tutorial-slice-lite pipeline against the dev kernel.
 - **Obsidian has no background process**, so the engine runs inside the
   plugin: reminders, push and daily-note entries happen while Obsidian is open
   on some device, and missed ones are caught up on the next start or focus.
-  Records live in a vault folder (default `Still/`, same layout as SiYuan) so
+  Records live in a vault folder (default `Still/`) so
   any vault sync carries them; per-device delivery logs keep every reminder to
   one device.
 
 ## Releasing
 
-Both plugins ship from one GitHub release whose tag is the bare version
-(`0.1.0`): Obsidian looks releases up by exact tag and reads `manifest.json` /
-`versions.json` from the repository root; the SiYuan bazaar installs
-`package.zip` from the latest release. Bump `apps/siyuan/plugin.json`,
-`manifest.json` and `versions.json` together — `node tools/check-release.mjs
-[tag]` checks them, and the release workflow runs it on the tag.
+Both plugins ship from one GitHub release. Obsidian looks up the release by its
+bare version tag and reads `manifest.json` and `versions.json` from the
+repository root. The SiYuan bazaar installs `package.zip` from the latest release.
+
+1. Bump `apps/siyuan/plugin.json` and `manifest.json` to the same version. Add
+   that version to `versions.json` and add the release notes at the top of
+   `CHANGELOG.md`.
+2. Run `node tools/check-release.mjs 0.1.4`, using the version being released.
+   Once the release changes are merged, tag the release commit and push the tag.
+
+   ```bash
+   git tag 0.1.4
+   git push origin 0.1.4
+   ```
+
+The [Release workflow](../.github/workflows/release.yml) checks the tag and runs
+type checks, tests, and builds. It publishes the SiYuan `package.zip` and the
+Obsidian `main.js`, `manifest.json`, and `styles.css` with build attestations.

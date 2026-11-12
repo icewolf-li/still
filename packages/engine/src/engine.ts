@@ -263,18 +263,23 @@ export class StillEngine {
 
   /** Merges a backup record by record; newer edits win on both sides. */
   importData(backup: unknown): Promise<ImportResult> {
+    if (!isStillBackup(backup)) return Promise.reject(new ValidationError(["not a Still backup file"]));
+    return this.mergeRecords(backup.subscriptions, backup.decisions);
+  }
+
+  /** Applies imported or replicated records, including tombstones, under the write lock. */
+  mergeRecords(subscriptions: readonly Subscription[], decisions: readonly Decision[]): Promise<ImportResult> {
     return this.#exclusive(async () => {
-      if (!isStillBackup(backup)) throw new ValidationError(["not a Still backup file"]);
       const result: ImportResult = { subscriptions: 0, decisions: 0, skipped: 0 };
-      for (const s of backup.subscriptions) {
+      for (const s of subscriptions) {
         if (await this.repo.mergeSubscription(s)) result.subscriptions++;
         else result.skipped++;
       }
-      for (const d of backup.decisions) {
+      for (const d of decisions) {
         if (await this.repo.mergeDecision(d)) result.decisions++;
         else result.skipped++;
       }
-      await this.#changed();
+      if (result.subscriptions || result.decisions) await this.#changed();
       return result;
     });
   }

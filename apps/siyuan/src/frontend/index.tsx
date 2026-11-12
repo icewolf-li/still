@@ -22,6 +22,8 @@ import pluginJson from "../../plugin.json" with { type: "json" };
 import { RPC, type RemindersDueParams } from "../shared/rpc.js";
 import { createRpcClient, type SiyuanStillClient } from "./client.js";
 import { ICONS } from "./icons.js";
+import { SyncSettings } from "./SyncSettings.js";
+import { StillSync } from "./sync-controller.js";
 import "./index.css";
 import { SCOPE_CLASS, ScopeRegistry, mount, type MountContext } from "./mount.js";
 
@@ -36,6 +38,7 @@ function isSiyuanDark(): boolean {
 
 export default class StillPlugin extends Plugin {
   #client!: SiyuanStillClient;
+  #remoteSync!: StillSync;
   #store!: StillStore;
   #scopes!: ScopeRegistry;
   #ctx!: MountContext;
@@ -62,6 +65,7 @@ export default class StillPlugin extends Plugin {
     this.#isMobile = getFrontend() === "mobile" || getFrontend() === "browser-mobile";
 
     this.#client = createRpcClient(this.kernel.rpc);
+    this.#remoteSync = new StillSync(this.#client);
     this.#store = createStillStore(this.#client);
     this.#store.setState({ hostDark: isSiyuanDark() });
     this.#scopes = new ScopeRegistry(this.#store);
@@ -136,6 +140,7 @@ export default class StillPlugin extends Plugin {
     this.kernel.rpc.bind(RPC.notifyChanged, this.#onChanged);
     this.kernel.rpc.bind(RPC.notifyRemindersDue, this.#onRemindersDue);
     this.eventBus.on("kernel-plugin-state-change", this.#onKernelState);
+    this.eventBus.on("sync-end", this.#remoteSync.request);
     // Catch up after the window was hidden (laptop sleep, another app in front).
     document.addEventListener("visibilitychange", this.#onVisible);
     window.addEventListener("focus", this.#onVisible);
@@ -151,6 +156,8 @@ export default class StillPlugin extends Plugin {
     this.kernel.rpc.unbind(RPC.notifyChanged, this.#onChanged);
     this.kernel.rpc.unbind(RPC.notifyRemindersDue, this.#onRemindersDue);
     this.eventBus.off("kernel-plugin-state-change", this.#onKernelState);
+    this.eventBus.off("sync-end", this.#remoteSync.request);
+    void this.#remoteSync.close().catch((error: unknown) => console.warn("[still] sync shutdown failed", error));
     document.removeEventListener("visibilitychange", this.#onVisible);
     window.removeEventListener("focus", this.#onVisible);
     for (const cleanup of this.#cleanups.splice(0)) cleanup();
@@ -166,7 +173,7 @@ export default class StillPlugin extends Plugin {
       const dialog = new Dialog({ title: this.#t("appName"), content: "<div></div>", width: "100vw", height: "100vh" });
       const body = dialog.element.querySelector(".b3-dialog__body") as HTMLElement;
       body.classList.add("still-dialog-body");
-      const unmount = mount(body, <ManagerView />, this.#ctx);
+      const unmount = mount(body, <ManagerView settingsExtra={<SyncSettings sync={this.#remoteSync} />} />, this.#ctx);
       const destroy = dialog.destroy.bind(dialog);
       dialog.destroy = (options) => {
         unmount();
@@ -204,11 +211,12 @@ export default class StillPlugin extends Plugin {
   #registerTab() {
     const ctx = () => this.#ctx;
     const unmounts = new WeakMap<object, () => void>();
+    const sync = this.#remoteSync;
     this.addTab({
       type: TAB_TYPE,
       init() {
         (this.element as HTMLElement).classList.add("still-tab");
-        unmounts.set(this, mount(this.element, <ManagerView />, ctx()));
+        unmounts.set(this, mount(this.element, <ManagerView settingsExtra={<SyncSettings sync={sync} />} />, ctx()));
       },
       destroy() {
         unmounts.get(this)?.();
@@ -251,6 +259,7 @@ export default class StillPlugin extends Plugin {
   #lastSync = 0;
   async #sync() {
     this.#lastSync = Date.now();
+    this.#remoteSync.request();
     await this.#store.getState().refresh();
     const { status, settings, saveSettings } = this.#store.getState();
     // First run: pick the currency the user most likely pays in.
@@ -284,6 +293,7 @@ export default class StillPlugin extends Plugin {
   }
 
   readonly #onChanged = () => {
+    this.#remoteSync.kernelChanged();
     void this.#store.getState().refresh();
   };
 
