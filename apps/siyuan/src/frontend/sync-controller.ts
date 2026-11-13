@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SiyuanStillClient } from "./client.js";
 import { mergeKernelRecords, openSyncDatabase, replicateStill, SYNC_BATCH_SIZE, syncHash } from "./replication.js";
-import { authenticate, DEFAULT_SYNC_CONFIG, normalizeConfig, supabaseClient, supabaseTransport, type SyncConfig } from "./supabase.js";
+import { authenticate, DEFAULT_SYNC_CONFIG, isConnectionConfigured, normalizeConfig, supabaseClient, supabaseTransport, type SyncConfig } from "./supabase.js";
 
 export interface SyncConfigStorage {
   load(workspaceId: string): Promise<SyncConfig>;
@@ -79,6 +79,13 @@ export class StillSync {
     await this.#load();
     if (this.#closed) return;
     const config = await this.configStorage.load(this.#workspaceId);
+    if (!isConnectionConfigured(config) && isConnectionConfigured(this.#state.config)) {
+      // An empty file can only come from an unconfigured or outdated device.
+      // Restore the valid configuration already active here instead of dropping it.
+      await this.configStorage.save(this.#state.config);
+      this.request();
+      return;
+    }
     if (JSON.stringify(config) !== JSON.stringify(this.#state.config)) await this.#applyConfig(config);
     this.request();
   }

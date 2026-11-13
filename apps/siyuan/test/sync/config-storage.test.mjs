@@ -30,6 +30,39 @@ test("synced config wins over local legacy and reload bypasses SDK fallback cach
 test("failed save keeps migration source; malformed and privileged settings reject", async () => {
   const a = setup(null, config); a.plugin.saveData = async () => ({ code: -1 }); await assert.rejects(a.store.load("device"), /could not save/); assert.equal(a.local.size, 1); assert.throws(() => connectionConfig({ ...config, key: "sb_secret_privileged" }), /publishable/); a.local.set("still-sync-device", "bad json"); await assert.rejects(a.store.load("device"));
 });
+test("an unconfigured device never writes an empty shared configuration", async () => {
+  const empty = { enabled: false, url: "", key: "", email: "", intervalSeconds: 60 };
+  const device = setup(null, empty);
+  assert.deepEqual(await device.store.load("device"), empty);
+  assert.equal(device.disk.size, 0);
+  await assert.rejects(device.store.save(empty), /empty configuration/);
+  assert.equal(device.disk.size, 0);
+});
+test("configured settings survive another device loading and saving locally", async () => {
+  const disk = new Map();
+  const legacy = { getItem: () => null, removeItem() {} };
+  const sharedPlugin = { data: {}, async loadData(name) { return disk.get(name) ?? ""; }, async saveData(name, value) { disk.set(name, value); return { code: 0 }; } };
+  const unconfigured = pluginSyncConfig({ ...sharedPlugin, data: {} }, legacy);
+  assert.equal((await unconfigured.load("other-device")).enabled, false);
+  assert.equal(disk.size, 0);
+  const configured = pluginSyncConfig(sharedPlugin, legacy);
+  await configured.save(config);
+  await assert.rejects(unconfigured.save({ enabled: false, url: "", key: "", email: "", intervalSeconds: 60 }));
+  assert.deepEqual(disk.get(SYNC_CONFIG_FILE), config);
+});
+test("configured legacy config repairs an empty official file", async () => {
+  const empty = { enabled: false, url: "", key: "", email: "", intervalSeconds: 60 };
+  const device = setup(empty, config);
+  assert.deepEqual(await device.store.load("device"), config);
+  assert.deepEqual(device.disk.get(SYNC_CONFIG_FILE), config);
+  assert.equal(device.local.size, 0);
+});
+test("turning remote sync off keeps and shares the non-empty connection", async () => {
+  const device = setup(config, null);
+  const disabled = { ...config, enabled: false };
+  await device.store.save(disabled);
+  assert.deepEqual(device.disk.get(SYNC_CONFIG_FILE), disabled);
+});
 function kernel(files = {}) { const disk = new Map(Object.entries(files)); globalThis.siyuan = { client: { async fetch(endpoint, init) { if (endpoint === "/api/file/getFile") { const path = JSON.parse(init.body).path; return disk.has(path) ? { status: 200, text: async () => disk.get(path) } : { status: 202, json: async () => ({ code: 404 }) }; } if (endpoint === "/api/file/putFile") { const boundary = init.headers["Content-Type"].split("boundary=")[1]; const parts = init.body.split(`--${boundary}`); disk.set(parts[1].split("\r\n\r\n")[1].trim(), parts[2].split("\r\n\r\n")[1].trim()); return { ok: true, json: async () => ({ code: 0 }) }; } return { ok: true, status: 200, json: async () => ({ code: 404 }) }; } } }; return disk; }
 const localPath = "/conf/still/records-v1.json"; const settingsPath = "/data/storage/petal/still/settings-v2.json";
 test("kernel migrates settings only, keeps ID and records, and reads synced changes without restart", async () => { const disk = kernel({ [localPath]: JSON.stringify({ id: "device", files: { "settings.json": '{"notifyAt":"08:00"}', "notifications.json": '{"channels":[]}', "subscriptions/a.json": '{"id":"a"}' } }) }); const { id, files } = await openWorkspace(); assert.equal(id, "device"); assert.ok(JSON.parse(disk.get("/conf/still/before-settings-migration-v2.json")).files["settings.json"]); assert.equal(await files.read("settings.json"), '{"notifyAt":"08:00"}'); assert.equal(JSON.parse(disk.get(localPath)).files["settings.json"], undefined); assert.equal(await files.read("subscriptions/a.json"), '{"id":"a"}'); disk.set(settingsPath, '{"notifyAt":"09:00"}'); assert.equal(await files.read("settings.json"), '{"notifyAt":"09:00"}'); await files.write("settings.json", '{"notifyAt":"10:00"}'); await files.write("subscriptions/b.json", '{"id":"b"}'); assert.equal(disk.get(settingsPath), '{"notifyAt":"10:00"}'); assert.equal(JSON.parse(disk.get(localPath)).files["settings.json"], undefined); });

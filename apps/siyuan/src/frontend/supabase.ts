@@ -13,6 +13,10 @@ export interface SyncConfig {
 
 export const DEFAULT_SYNC_CONFIG: SyncConfig = { enabled: false, url: "", key: "", email: "", intervalSeconds: 60 };
 
+export function isConnectionConfigured(config: SyncConfig): boolean {
+  return Boolean(config.url || config.key || config.email);
+}
+
 export function normalizeConfig(config: SyncConfig): SyncConfig {
   const url = new URL(config.url.trim());
   if (url.protocol !== "https:" || url.pathname !== "/" || url.search || url.hash || url.username || url.password) {

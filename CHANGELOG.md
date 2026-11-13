@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.1.5
 
 - Move SiYuan general and notification/journal settings to official plugin data storage, with migration backups and live reload after SiYuan sync.
 - Store Supabase connection parameters in a separate `loadData/saveData` file and migrate previous localStorage settings; keep passwords and Auth sessions device-local.
+- Prevent unconfigured devices from writing empty Supabase settings over a synchronized configuration; configured devices repair empty files after a data change.
 
 ## 0.1.4
 

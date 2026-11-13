@@ -1,5 +1,5 @@
 import type { Plugin } from "siyuan";
-import { DEFAULT_SYNC_CONFIG, normalizeConfig, type SyncConfig } from "./supabase.js";
+import { DEFAULT_SYNC_CONFIG, isConnectionConfigured, normalizeConfig, type SyncConfig } from "./supabase.js";
 import type { SyncConfigStorage } from "./sync-controller.js";
 
 export const SYNC_CONFIG_FILE = "supabase-connection-v1.json";
@@ -28,7 +28,9 @@ export function connectionConfig(value: unknown): SyncConfig {
 
 export function pluginSyncConfig(plugin: Pick<Plugin, "loadData" | "saveData" | "data">, legacy: Storage): SyncConfigStorage {
   async function save(config: SyncConfig) {
-    const result = await bounded(plugin.saveData(SYNC_CONFIG_FILE, connectionConfig(config)));
+    const next = connectionConfig(config);
+    if (!isConnectionConfigured(next)) throw new Error("Refusing to replace the shared Supabase settings with an empty configuration");
+    const result = await bounded(plugin.saveData(SYNC_CONFIG_FILE, next));
     if (!result || result.code !== 0) throw new Error("SiYuan could not save the Supabase connection settings");
   }
   return {
@@ -39,16 +41,23 @@ export function pluginSyncConfig(plugin: Pick<Plugin, "loadData" | "saveData" | 
       const oldKey = `still-sync-${workspaceId}`;
       if (stored !== "" && stored !== null && stored !== undefined) {
         const config = connectionConfig(stored);
-        legacy.removeItem(oldKey);
-        return config;
+        if (isConnectionConfigured(config)) {
+          legacy.removeItem(oldKey);
+          return config;
+        }
       }
       const raw = legacy.getItem(oldKey);
-      if (raw === null) return { ...DEFAULT_SYNC_CONFIG };
-      const config = connectionConfig(JSON.parse(raw));
-      await save(config);
-      // Do not discard the legacy value until the official write was acknowledged.
-      legacy.removeItem(oldKey);
-      return config;
+      if (raw !== null) {
+        const config = connectionConfig(JSON.parse(raw));
+        if (isConnectionConfigured(config)) {
+          await save(config);
+          // Do not discard the legacy value until the official write was acknowledged.
+          legacy.removeItem(oldKey);
+          return config;
+        }
+        legacy.removeItem(oldKey);
+      }
+      return { ...DEFAULT_SYNC_CONFIG };
     },
     save,
   };
